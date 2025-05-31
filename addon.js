@@ -128,19 +128,15 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     return res.json({ metas: [] });
   }
   try {
-    const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
-    console.log('Root folder data:', JSON.stringify(data, null, 2));
     const items = [];
-    const folders = data.folders || [];
-    const files = data.files || [];
-    for (const folder of folders) {
-      const folderData = await fetchJsonDictionary(`${API_URL}/folder/${folder.id}?access_token=${accessToken}`);
-      console.log(`Folder ${folder.id} data:`, JSON.stringify(folderData, null, 2));
-      const folderFiles = folderData.files || [];
-      for (const file of folderFiles) {
-        if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
-        if (!file.play_video && !file.play_audio) continue;
-        if (file.video_progress !== '100' && file.video_progress !== '101') continue; // Ensure fully downloaded
+    // Fetch root folder
+    const rootData = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
+    console.log('Root folder data:', JSON.stringify(rootData, null, 2));
+
+    // Process root files
+    const rootFiles = rootData.files || [];
+    for (const file of rootFiles) {
+      if (file.play_video || file.play_audio) {
         items.push({
           id: `seedr|${file.folder_file_id}`,
           name: file.name,
@@ -149,17 +145,25 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
         });
       }
     }
-    for (const file of files) {
-      if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
-      if (!file.play_video && !file.play_audio) continue;
-      if (file.video_progress !== '100' && file.video_progress !== '101') continue; // Ensure fully downloaded
-      items.push({
-        id: `seedr|${file.folder_file_id}`,
-        name: file.name,
-        type: 'movie',
-        poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
-      });
+
+    // Process folders
+    const folders = rootData.folders || [];
+    for (const folder of folders) {
+      const folderData = await fetchJsonDictionary(`${API_URL}/folder/${folder.id}?access_token=${accessToken}`);
+      console.log(`Folder ${folder.id} data:`, JSON.stringify(folderData, null, 2));
+      const folderFiles = folderData.files || [];
+      for (const file of folderFiles) {
+        if (file.play_video || file.play_audio) {
+          items.push({
+            id: `seedr|${file.folder_file_id}`,
+            name: file.name,
+            type: 'movie',
+            poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
+          });
+        }
+      }
     }
+
     console.log('Catalog items:', JSON.stringify(items, null, 2));
     res.json({ metas: items });
   } catch (e) {
@@ -179,36 +183,22 @@ app.get('/stream/:type/:id.json', async (req, res) => {
   }
   try {
     console.log(`Fetching stream for fileId: ${fileId}`);
-    // Try primary HLS endpoint
-    let url = `${API_URL}/media/hls/${fileId}?access_token=${accessToken}`;
-    let response = await fetchJsonDictionary(url);
-    console.log(`Stream API response for ${fileId} (/media/hls):`, JSON.stringify(response, null, 2));
-    if (response && response.url) {
-      console.log(`Stream URL generated: ${response.url}`);
-      res.json({
-        streams: [{
-          title: 'Seedr Stream',
-          url: response.url,
-          behaviorHints: { bingeGroup: `seedr-${fileId}` }
-        }]
-      });
-      return;
-    }
-    // Fallback 1: Try file info to verify streamability
-    url = `${API_URL}/file/${fileId}?access_token=${accessToken}`;
-    response = await fetchJsonDictionary(url);
-    console.log(`File info response for ${fileId}:`, JSON.stringify(response, null, 2));
-    if (response && (response.play_video || response.play_audio) && response.progress >= 100) {
-      // Try alternative HLS endpoint
-      url = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
-      response = await fetchJsonDictionary(url);
-      console.log(`Stream API response for ${fileId} (/file/hls):`, JSON.stringify(response, null, 2));
-      if (response && response.url) {
-        console.log(`Stream URL generated (file/hls): ${response.url}`);
+    // Fetch file details to verify streamability
+    const fileInfo = await fetchJsonDictionary(`${API_URL}/file/${fileId}?access_token=${accessToken}`);
+    console.log(`File info for ${fileId}:`, JSON.stringify(fileInfo, null, 2));
+    
+    if (fileInfo && (fileInfo.play_video || fileInfo.play_audio)) {
+      // Try HLS endpoint
+      const hlsUrl = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
+      const hlsResponse = await fetchJsonDictionary(hlsUrl);
+      console.log(`HLS response for ${fileId}:`, JSON.stringify(hlsResponse, null, 2));
+      
+      if (hlsResponse && hlsResponse.url) {
+        console.log(`Stream URL generated: ${hlsResponse.url}`);
         res.json({
           streams: [{
             title: 'Seedr Stream',
-            url: response.url,
+            url: hlsResponse.url,
             behaviorHints: { bingeGroup: `seedr-${fileId}` }
           }]
         });
