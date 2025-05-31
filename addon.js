@@ -35,16 +35,23 @@ function saveUsers(data) {
 // API request helper
 async function fetchJsonDictionary(url, postParams = null) {
   try {
-    if (postParams) {
-      const r = await axios.post(url, postParams);
-      return r.data;
-    } else {
-      const r = await axios.get(url);
-      return r.data;
-    }
+    const config = postParams ? { method: 'post', url, data: postParams } : { method: 'get', url };
+    const r = await axios(config);
+    return r.data;
   } catch (e) {
     console.error(`API error at ${url}: ${e.message}`, e.response?.data || '');
     throw e;
+  }
+}
+
+// Token validation
+async function validateToken(accessToken) {
+  try {
+    const response = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
+    return !response.error;
+  } catch (e) {
+    console.error('Token validation failed:', e.message);
+    return false;
   }
 }
 
@@ -81,7 +88,7 @@ app.post('/get-device-code', async (req, res) => {
         device_code: deviceCodeDict.device_code
       });
     } else {
-      console.log('Failed to get device code');
+      console.log('Failed to get device code:', deviceCodeDict);
       res.json({ success: false, error: 'Failed to get device code' });
     }
   } catch (e) {
@@ -134,9 +141,9 @@ app.get('/manifest.json', (req, res) => {
 // Route: Catalog
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    console.error('No access token found');
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    console.error('Invalid or no access token');
     return res.json({ metas: [] });
   }
   try {
@@ -182,9 +189,9 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 app.get('/stream/:type/:id.json', async (req, res) => {
   const [, fileId] = req.params.id.split('|');
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    console.error('No access token found for stream request');
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    console.error('Invalid or no access token for stream request');
     return res.json({ streams: [] });
   }
   try {
@@ -218,9 +225,9 @@ app.get('/stream/:type/:id.json', async (req, res) => {
 // Route: List Files/Folders
 app.get('/files', async (req, res) => {
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    return res.json({ success: false, error: 'No access token' });
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    return res.json({ success: false, error: 'No valid access token' });
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
@@ -239,7 +246,7 @@ app.get('/files', async (req, res) => {
     }));
     res.json({ success: true, folders, files });
   } catch (e) {
-    console.error('Error loading files:', e.message);
+    console.error('Error loading files:', e.message, e.response?.data || '');
     res.json({ success: false, error: 'Failed to load files/folders' });
   }
 });
@@ -248,9 +255,9 @@ app.get('/files', async (req, res) => {
 app.get('/files/:folderId', async (req, res) => {
   const { folderId } = req.params;
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    return res.json({ success: false, error: 'No access token' });
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    return res.json({ success: false, error: 'No valid access token' });
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder/${folderId}?access_token=${accessToken}`);
@@ -263,7 +270,7 @@ app.get('/files/:folderId', async (req, res) => {
     }));
     res.json({ success: true, name: data.name || 'Folder', files });
   } catch (e) {
-    console.error(`Error loading folder ${folderId}:`, e.message);
+    console.error(`Error loading folder ${folderId}:`, e.message, e.response?.data || '');
     res.json({ success: false, error: 'Failed to load folder contents' });
   }
 });
@@ -272,19 +279,21 @@ app.get('/files/:folderId', async (req, res) => {
 app.get('/folder-link/:folderId', async (req, res) => {
   const { folderId } = req.params;
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    return res.json({ success: false, error: 'No access token' });
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    return res.json({ success: false, error: 'No valid access token' });
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder/${folderId}/download?access_token=${accessToken}`);
+    console.log(`Folder link response for ${folderId}:`, JSON.stringify(data, null, 2));
     if (data && data.url) {
       res.json({ success: true, url: data.url });
     } else {
+      console.error(`No URL in folder link response for ${folderId}`);
       res.json({ success: false, error: 'Failed to fetch folder link' });
     }
   } catch (e) {
-    console.error(`Error fetching link for folder ${folderId}:`, e.message);
+    console.error(`Error fetching link for folder ${folderId}:`, e.message, e.response?.data || '');
     res.json({ success: false, error: 'Failed to fetch folder link' });
   }
 });
@@ -295,25 +304,21 @@ app.get('/file-link/:id', async (req, res) => {
   const type = id[0];
   const fileId = id.slice(1);
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    return res.json({ success: false, error: 'No access token' });
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    return res.json({ success: false, error: 'No valid access token' });
   }
   try {
-    const data = await fetchJsonDictionary(`${API_URL}/file/${fileId}?access_token=${accessToken}`);
-    if (data && (data.play_video || data.play_audio)) {
-      const hlsUrl = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
-      const hlsData = await fetchJsonDictionary(hlsUrl);
-      if (hlsData && hlsData.url) {
-        res.json({ success: true, url: hlsData.url });
-      } else {
-        res.json({ success: false, error: 'Failed to fetch file link' });
-      }
+    const data = await fetchJsonDictionary(`${API_URL}/file/${fileId}/download?access_token=${accessToken}`);
+    console.log(`File link response for ${fileId}:`, JSON.stringify(data, null, 2));
+    if (data && data.url) {
+      res.json({ success: true, url: data.url });
     } else {
-      res.json({ success: false, error: 'File not playable' });
+      console.error(`No URL in file link response for ${fileId}`);
+      res.json({ success: false, error: 'Failed to fetch file link' });
     }
   } catch (e) {
-    console.error(`Error fetching link for file ${fileId}:`, e.message);
+    console.error(`Error fetching link for file ${fileId}:`, e.message, e.response?.data || '');
     res.json({ success: false, error: 'Failed to fetch file link' });
   }
 });
@@ -322,20 +327,22 @@ app.get('/file-link/:id', async (req, res) => {
 app.post('/delete/:type/:id', async (req, res) => {
   const { type, id } = req.params;
   const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    return res.json({ success: false, error: 'No access token' });
+  let accessToken = users.access_token;
+  if (!accessToken || !(await validateToken(accessToken))) {
+    return res.json({ success: false, error: 'No valid access token' });
   }
   try {
-    const endpoint = type === 'file' ? `file/${id}` : `folder/${id}`;
-    const data = await fetchJsonDictionary(`${API_URL}/${endpoint}/delete?access_token=${accessToken}`);
+    const endpoint = type === 'file' ? `file/${id}/delete` : `folder/${id}/delete`;
+    const data = await fetchJsonDictionary(`${API_URL}/${endpoint}?access_token=${accessToken}`);
+    console.log(`Delete response for ${type} ${id}:`, JSON.stringify(data, null, 2));
     if (data && data.result) {
       res.json({ success: true });
     } else {
+      console.error(`No result in delete response for ${type} ${id}`);
       res.json({ success: false, error: 'Failed to delete' });
     }
   } catch (e) {
-    console.error(`Error deleting ${type} ${id}:`, e.message);
+    console.error(`Error deleting ${type} ${id}:`, e.message, e.response?.data || '');
     res.json({ success: false, error: 'Failed to delete' });
   }
 });
