@@ -108,7 +108,7 @@ app.post('/check-auth', async (req, res) => {
 // Route: Manifest
 app.get('/manifest.json', (req, res) => {
   res.json({
-    id: 'sidh3369.seedr.stremio.addon', // Fixed: Changed 'idtypename' to 'id'
+    id: 'sidh3369.seedr.stremio.addon',
     version: '1.0.0',
     name: 'Seedr Addon',
     description: 'Stream from your Seedr.cc cloud.',
@@ -137,6 +137,7 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
       const folderFiles = folderData.files || [];
       for (const file of folderFiles) {
         if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
+        if (!file.play_video && !file.play_audio) continue; // Ensure streamable
         items.push({
           id: `seedr|${file.folder_file_id}`,
           name: file.name,
@@ -147,6 +148,7 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     }
     for (const file of files) {
       if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
+      if (!file.play_video && !file.play_audio) continue; // Ensure streamable
       items.push({
         id: `seedr|${file.folder_file_id}`,
         name: file.name,
@@ -154,6 +156,7 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
         poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
       });
     }
+    console.log('Catalog items:', items);
     res.json({ metas: items });
   } catch (e) {
     console.error('Catalog error:', e.message);
@@ -167,26 +170,29 @@ app.get('/stream/:type/:id.json', async (req, res) => {
   const users = loadUsers();
   const accessToken = users.access_token;
   if (!accessToken) {
-    console.error('No access token found');
+    console.error('No access token found for stream request');
     return res.json({ streams: [] });
   }
   try {
+    console.log(`Fetching stream for fileId: ${fileId}`);
     const url = `${API_URL}/media/hls/${fileId}?access_token=${accessToken}`;
     const response = await fetchJsonDictionary(url);
+    console.log(`Stream API response for ${fileId}:`, JSON.stringify(response, null, 2));
     if (response && response.url) {
+      console.log(`Stream URL generated: ${response.url}`);
       res.json({
         streams: [{
           title: 'Seedr Stream',
-          url: response.url, // HLS (M3U) URL for streaming
+          url: response.url, // HLS (M3U) URL
           behaviorHints: { bingeGroup: `seedr-${fileId}` }
         }]
       });
     } else {
-      console.error(`No stream URL for file ${fileId}`);
+      console.error(`No stream URL in response for file ${fileId}`);
       res.json({ streams: [] });
     }
   } catch (e) {
-    console.error(`Stream error for ${fileId}:`, e.message);
+    console.error(`Stream error for ${fileId}:`, e.message, e.response?.data || '');
     res.json({ streams: [] });
   }
 });
