@@ -1,0 +1,19 @@
+{
+  "name": "stremio-seedr-addon",
+  "version": "1.0.0",
+  "description": "Stremio Addon for Seedr.cc",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js"
+  },
+  "keywords": [
+    "stremio",
+    "seedr"
+  ],
+  "author": "Your Name",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "seedr": "^1.0.0"
+  }
+}
