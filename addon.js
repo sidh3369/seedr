@@ -108,7 +108,7 @@ app.post('/check-auth', async (req, res) => {
 // Route: Manifest
 app.get('/manifest.json', (req, res) => {
   res.json({
-    idtypename: 'sidh3369.seedr.stremio.addon', // Unique ID
+    id: 'sidh3369.seedr.stremio.addon', // Fixed: Changed 'idtypename' to 'id'
     version: '1.0.0',
     name: 'Seedr Addon',
     description: 'Stream from your Seedr.cc cloud.',
