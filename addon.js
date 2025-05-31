@@ -29,7 +29,11 @@ function loadUsers() {
   }
 }
 function saveUsers(data) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('Error saving users:', e.message);
+  }
 }
 
 // API request helper
@@ -39,12 +43,12 @@ async function fetchJsonDictionary(url, postParams = null) {
     const r = await axios(config);
     return r.data;
   } catch (e) {
-    console.error(`API error at ${url}: ${e.message}`, e.response?.data || '');
+    console.error(`API error at ${url}: ${e.message}`, e.response?.data || e.response?.status || '');
     throw e;
   }
 }
 
-// Token validation
+// Token validation and refresh
 async function validateToken(accessToken) {
   try {
     const response = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
@@ -52,6 +56,28 @@ async function validateToken(accessToken) {
   } catch (e) {
     console.error('Token validation failed:', e.message);
     return false;
+  }
+}
+
+async function refreshToken(users) {
+  const deviceCode = users.tempDeviceCode;
+  if (!deviceCode) {
+    console.error('No device code for token refresh');
+    return null;
+  }
+  try {
+    const tokenDict = await fetchJsonDictionary(`${AUTHENTICATION_URL}?device_code=${deviceCode}&client_id=${CLIENT_ID}`);
+    if (tokenDict && !tokenDict.error && tokenDict.access_token) {
+      users.access_token = tokenDict.access_token;
+      saveUsers(users);
+      console.log('Token refreshed:', tokenDict.access_token);
+      return tokenDict.access_token;
+    }
+    console.log('Token refresh failed:', tokenDict.error || 'No token');
+    return null;
+  } catch (e) {
+    console.error('Error refreshing token:', e.message);
+    return null;
   }
 }
 
@@ -143,8 +169,11 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    console.error('Invalid or no access token');
-    return res.json({ metas: [] });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      console.error('Invalid or no access token');
+      return res.json({ metas: [] });
+    }
   }
   try {
     const items = [];
@@ -191,8 +220,11 @@ app.get('/stream/:type/:id.json', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    console.error('Invalid or no access token for stream request');
-    return res.json({ streams: [] });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      console.error('Invalid or no access token for stream request');
+      return res.json({ streams: [] });
+    }
   }
   try {
     console.log(`Fetching stream for fileId: ${fileId}`);
@@ -227,7 +259,10 @@ app.get('/files', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    return res.json({ success: false, error: 'No valid access token' });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      return res.json({ success: false, error: 'No valid access token' });
+    }
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
@@ -257,7 +292,10 @@ app.get('/files/:folderId', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    return res.json({ success: false, error: 'No valid access token' });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      return res.json({ success: false, error: 'No valid access token' });
+    }
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder/${folderId}?access_token=${accessToken}`);
@@ -281,7 +319,10 @@ app.get('/folder-link/:folderId', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    return res.json({ success: false, error: 'No valid access token' });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      return res.json({ success: false, error: 'No valid access token' });
+    }
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder/${folderId}/download?access_token=${accessToken}`);
@@ -306,15 +347,30 @@ app.get('/file-link/:id', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    return res.json({ success: false, error: 'No valid access token' });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      return res.json({ success: false, error: 'No valid access token' });
+    }
   }
   try {
-    const data = await fetchJsonDictionary(`${API_URL}/file/${fileId}/download?access_token=${accessToken}`);
-    console.log(`File link response for ${fileId}:`, JSON.stringify(data, null, 2));
-    if (data && data.url) {
-      res.json({ success: true, url: data.url });
+    const fileInfo = await fetchJsonDictionary(`${API_URL}/file/${fileId}?access_token=${accessToken}`);
+    console.log(`File info for ${fileId}:`, JSON.stringify(fileInfo, null, 2));
+    if (fileInfo && (fileInfo.play_video || fileInfo.play_audio)) {
+      const hlsUrl = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
+      const hlsResponse = await fetchJsonDictionary(hlsUrl);
+      console.log(`HLS response for ${fileId}:`, JSON.stringify(hlsResponse, null, 2));
+      if (hlsResponse && hlsResponse.url) {
+        res.json({ success: true, url: hlsResponse.url });
+        return;
+      }
+    }
+    // Fallback to direct download link
+    const downloadData = await fetchJsonDictionary(`${API_URL}/file/${fileId}/download?access_token=${accessToken}`);
+    console.log(`Download link response for ${fileId}:`, JSON.stringify(downloadData, null, 2));
+    if (downloadData && downloadData.url) {
+      res.json({ success: true, url: downloadData.url });
     } else {
-      console.error(`No URL in file link response for ${fileId}`);
+      console.error(`No URL in response for file ${fileId}`);
       res.json({ success: false, error: 'Failed to fetch file link' });
     }
   } catch (e) {
@@ -329,16 +385,19 @@ app.post('/delete/:type/:id', async (req, res) => {
   const users = loadUsers();
   let accessToken = users.access_token;
   if (!accessToken || !(await validateToken(accessToken))) {
-    return res.json({ success: false, error: 'No valid access token' });
+    accessToken = await refreshToken(users);
+    if (!accessToken) {
+      return res.json({ success: false, error: 'No valid access token' });
+    }
   }
   try {
     const endpoint = type === 'file' ? `file/${id}/delete` : `folder/${id}/delete`;
     const data = await fetchJsonDictionary(`${API_URL}/${endpoint}?access_token=${accessToken}`);
     console.log(`Delete response for ${type} ${id}:`, JSON.stringify(data, null, 2));
-    if (data && data.result) {
+    if (data && data.result === true) {
       res.json({ success: true });
     } else {
-      console.error(`No result in delete response for ${type} ${id}`);
+      console.error(`Delete failed for ${type} ${id}:`, data.error || 'No result');
       res.json({ success: false, error: 'Failed to delete' });
     }
   } catch (e) {
