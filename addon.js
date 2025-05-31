@@ -1,171 +1,118 @@
-// Dependencies
+// addon.js
+require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const bodyParser = require('body-parser');
+const basicAuth = require('basic-auth');
 const axios = require('axios');
-const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Data file for storing users
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-if (!fs.existsSync(path.dirname(USERS_FILE))) fs.mkdirSync(path.dirname(USERS_FILE));
-if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '{}');
+const publicDir = path.join(__dirname, 'public');
 
-// Load users
-function loadUsers() {
-  return JSON.parse(fs.readFileSync(USERS_FILE));
-}
-function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-
+app.use(express.static(publicDir));
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(bodyParser.json());
 
-// Serve main page
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({}));
+
+const manifest = {
+  id: 'community.seedr.stremio.addon',
+  version: '1.0.0',
+  name: 'Seedr Stremio Addon',
+  description: 'Stream content directly from your Seedr.cc account.',
+  resources: ['catalog', 'stream'],
+  types: ['movie', 'series'],
+  catalogs: [
+    { type: 'movie', id: 'seedr_movies', name: 'Seedr Movies', extra: [{ name: 'search', isRequired: false }] },
+    { type: 'series', id: 'seedr_series', name: 'Seedr Series', extra: [{ name: 'search', isRequired: false }] }
+  ],
+  behaviorHints: { configurable: true }
+};
+
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json(manifest);
 });
 
-// Handle login via username/password
+app.get('/configure', (req, res) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
+
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  const auth = Buffer.from(`${email}:${password}`).toString('base64');
-
   try {
-    const response = await axios.get('https://www.seedr.cc/rest/user', {
+    const auth = Buffer.from(`${email}:${password}`).toString('base64');
+    const result = await axios.get('https://www.seedr.cc/rest/user', {
       headers: { Authorization: `Basic ${auth}` }
     });
-
-    const users = loadUsers();
-    users[email] = { auth, email, username: response.data.username };
-    saveUsers(users);
-
-    res.send(`
-      <h2>✅ Login Success</h2>
-      <p>Welcome ${response.data.username}</p>
-      <p><a href="stremio://your-app.onrender.com/manifest.json">Install in Stremio</a></p>
-    `);
+    if (result.data && result.data.id) {
+      const users = JSON.parse(fs.readFileSync(USERS_FILE));
+      users[email] = password;
+      fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+      return res.json({ success: true });
+    }
   } catch (err) {
-    res.send(`<h2>❌ Login Failed. Please try again.</h2><a href="/">Go Back</a>`);
+    console.error(err.message);
   }
+  res.status(401).json({ success: false });
 });
 
-// Device auth endpoint (start)
-app.get('/device', (req, res) => {
-  const deviceCode = crypto.randomBytes(4).toString('hex');
-  const pendingFile = path.join(__dirname, 'data', 'pending', deviceCode);
-  if (!fs.existsSync(path.dirname(pendingFile))) fs.mkdirSync(path.dirname(pendingFile));
-  fs.writeFileSync(pendingFile, '');
-  res.send(`
-    <h2>📱 Device Code</h2>
-    <p>Use this code on another device: <code>${deviceCode}</code></p>
-    <p>Then go to <a href="/activate?code=${deviceCode}">/activate?code=${deviceCode}</a> on another device to login.</p>
-  `);
-});
-
-// Activation page
-app.get('/activate', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'activate.html'));
-});
-
-// POST device login
-app.post('/activate', async (req, res) => {
-  const { email, password, code } = req.body;
-  const auth = Buffer.from(`${email}:${password}`).toString('base64');
-
-  try {
-    const response = await axios.get('https://www.seedr.cc/rest/user', {
-      headers: { Authorization: `Basic ${auth}` }
-    });
-
-    const pendingFile = path.join(__dirname, 'data', 'pending', code);
-    if (!fs.existsSync(pendingFile)) return res.send('<h2>❌ Invalid code.</h2>');
-
-    const users = loadUsers();
-    users[email] = { auth, email, username: response.data.username };
-    saveUsers(users);
-    fs.unlinkSync(pendingFile);
-
-    res.send(`<h2>✅ Device Linked. Welcome ${response.data.username}</h2>`);
-  } catch (err) {
-    res.send(`<h2>❌ Login Failed.</h2>`);
-  }
-});
-
-// Manifest
-app.get('/manifest.json', (req, res) => {
-  res.json({
-    id: "community.seedr.stremio.addon",
-    version: "1.0.0",
-    name: "Seedr Stremio Addon",
-    description: "Stream your Seedr.cc library",
-    resources: ["catalog", "stream"],
-    types: ["movie", "series"],
-    catalogs: [{
-      type: "movie",
-      id: "seedr_catalog",
-      name: "Seedr Library",
-      extra: [{ name: "search", isRequired: false }]
-    }],
-    behaviorHints: { configurable: true }
-  });
-});
-
-// Catalog route
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
-  const users = loadUsers();
-  let items = [];
+  const { type } = req.params;
+  const users = JSON.parse(fs.readFileSync(USERS_FILE));
+  const allFiles = [];
 
-  for (const user of Object.values(users)) {
+  for (const [email, password] of Object.entries(users)) {
+    const auth = Buffer.from(`${email}:${password}`).toString('base64');
     try {
-      const files = await axios.get('https://www.seedr.cc/rest/folder', {
-        headers: { Authorization: `Basic ${user.auth}` }
+      const result = await axios.get('https://www.seedr.cc/rest/folder', {
+        headers: { Authorization: `Basic ${auth}` }
       });
-
-      for (const file of files.data.files || []) {
-        if (file.name && file.id) {
-          items.push({
-            id: `${user.email}-${file.id}`,
-            name: file.name,
-            type: file.folder ? "series" : "movie",
-            poster: 'https://via.placeholder.com/150?text=Seedr'
-          });
-        }
-      }
+      result.data.files?.forEach(file => {
+        allFiles.push({
+          id: file.id.toString(),
+          type: file.name.toLowerCase().includes('s') ? 'series' : 'movie',
+          name: file.name,
+          poster: `https://www.seedr.cc/rest/file/${file.id}/thumbnail`,
+          seedr: { email, password }
+        });
+      });
     } catch (e) {
-      console.error(`Failed loading for ${user.email}`);
+      console.error(`Failed for ${email}: ${e.message}`);
     }
   }
-
-  res.json({ metas: items });
+  res.json({ catalog: allFiles });
 });
 
-// Stream route
 app.get('/stream/:type/:id.json', async (req, res) => {
-  const [email, id] = req.params.id.split('-');
-  const users = loadUsers();
-  const user = users[email];
-
-  if (!user) return res.json({ streams: [] });
-
-  try {
-    const file = await axios.get(`https://www.seedr.cc/rest/file/${id}`, {
-      headers: { Authorization: `Basic ${user.auth}` }
-    });
-
-    res.json({
-      streams: [{
-        name: file.data.name,
-        url: `https://www.seedr.cc/rest/file/${id}/hls`,
-        title: file.data.name
-      }]
-    });
-  } catch (e) {
-    res.json({ streams: [] });
+  const { id } = req.params;
+  const users = JSON.parse(fs.readFileSync(USERS_FILE));
+  for (const [email, password] of Object.entries(users)) {
+    const auth = Buffer.from(`${email}:${password}`).toString('base64');
+    try {
+      const response = await axios.get(`https://www.seedr.cc/rest/file/${id}`, {
+        headers: { Authorization: `Basic ${auth}` }
+      });
+      if (response.data) {
+        return res.json({
+          streams: [
+            {
+              title: response.data.name,
+              name: 'Seedr',
+              url: `https://www.seedr.cc/rest/file/${id}/hls`,
+              behaviorHints: { bingeGroup: `seedr-${id}` }
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      continue;
+    }
   }
+  res.json({ streams: [] });
 });
 
 app.listen(PORT, () => {
