@@ -1,0 +1,2 @@
+# seedr
+seedr account add
