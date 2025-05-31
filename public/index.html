@@ -108,17 +108,18 @@
 
         const result = await res.json();
 
-        if (res.ok) {
-          message.textContent = '✅ Login successful!';
+        if (res.ok && result.success) {
+          message.textContent = '✅ Login successful! Token saved.';
           installLink.href = `stremio://${window.location.host}/manifest.json`;
           installLink.style.display = 'block';
         } else {
-          message.textContent = `❌ ${result.error || 'Login failed'}`;
+          message.textContent = `❌ ${result.error || 'Login failed. Check credentials.'}`;
           installLink.style.display = 'none';
         }
       } catch (err) {
-        message.textContent = '❌ Server error. Try again.';
+        message.textContent = '❌ Server error. Check connection or try again.';
         installLink.style.display = 'none';
+        console.error('Error:', err);
       }
     });
   </script>
