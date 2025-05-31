@@ -3,32 +3,42 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const bodyParser = require('body-parser');
-const basicAuth = require('basic-auth');
 const axios = require('axios');
+const bodyParser = require('body-parser');
+
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-const publicDir = path.join(__dirname, 'public');
-
-app.use(express.static(publicDir));
-app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({}));
+const USERS_FILE = 'users.json';
+function readUsers() {
+  try {
+    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+}
+function saveUsers(users) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+}
 
+// --- Manifest ---
 const manifest = {
   id: 'community.seedr.stremio.addon',
   version: '1.0.0',
   name: 'Seedr Stremio Addon',
-  description: 'Stream content directly from your Seedr.cc account.',
+  description: 'Stream content directly from your Seedr.cc accounts.',
   resources: ['catalog', 'stream'],
   types: ['movie', 'series'],
-  catalogs: [
-    { type: 'movie', id: 'seedr_movies', name: 'Seedr Movies', extra: [{ name: 'search', isRequired: false }] },
-    { type: 'series', id: 'seedr_series', name: 'Seedr Series', extra: [{ name: 'search', isRequired: false }] }
-  ],
+  catalogs: [{
+    type: 'movie',
+    id: 'seedr_movies',
+    name: 'Seedr Public',
+    extra: [{ name: 'search', isRequired: false }]
+  }],
   behaviorHints: { configurable: true }
 };
 
@@ -37,83 +47,78 @@ app.get('/manifest.json', (req, res) => {
   res.json(manifest);
 });
 
-app.get('/configure', (req, res) => {
-  res.sendFile(path.join(publicDir, 'index.html'));
-});
-
-app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const auth = Buffer.from(`${email}:${password}`).toString('base64');
-    const result = await axios.get('https://www.seedr.cc/rest/user', {
-      headers: { Authorization: `Basic ${auth}` }
-    });
-    if (result.data && result.data.id) {
-      const users = JSON.parse(fs.readFileSync(USERS_FILE));
-      users[email] = password;
-      fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-      return res.json({ success: true });
-    }
-  } catch (err) {
-    console.error(err.message);
-  }
-  res.status(401).json({ success: false });
-});
-
+// --- Catalog ---
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
-  const { type } = req.params;
-  const users = JSON.parse(fs.readFileSync(USERS_FILE));
-  const allFiles = [];
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const users = readUsers();
+  const catalog = [];
 
   for (const [email, password] of Object.entries(users)) {
-    const auth = Buffer.from(`${email}:${password}`).toString('base64');
     try {
-      const result = await axios.get('https://www.seedr.cc/rest/folder', {
-        headers: { Authorization: `Basic ${auth}` }
-      });
-      result.data.files?.forEach(file => {
-        allFiles.push({
-          id: file.id.toString(),
-          type: file.name.toLowerCase().includes('s') ? 'series' : 'movie',
+      const auth = { auth: { username: email, password } };
+      const { data } = await axios.get('https://www.seedr.cc/rest/folder', auth);
+      data.files.filter(file => isVideoFile(file.name)).forEach(file => {
+        catalog.push({
+          id: `${email}:${file.id}`,
           name: file.name,
+          type: 'movie',
           poster: `https://www.seedr.cc/rest/file/${file.id}/thumbnail`,
-          seedr: { email, password }
         });
       });
-    } catch (e) {
-      console.error(`Failed for ${email}: ${e.message}`);
+    } catch (err) {
+      console.warn(`Failed for ${email}:`, err.message);
     }
   }
-  res.json({ catalog: allFiles });
+
+  res.json({ metas: catalog });
 });
 
+// --- Stream ---
 app.get('/stream/:type/:id.json', async (req, res) => {
-  const { id } = req.params;
-  const users = JSON.parse(fs.readFileSync(USERS_FILE));
-  for (const [email, password] of Object.entries(users)) {
-    const auth = Buffer.from(`${email}:${password}`).toString('base64');
-    try {
-      const response = await axios.get(`https://www.seedr.cc/rest/file/${id}`, {
-        headers: { Authorization: `Basic ${auth}` }
-      });
-      if (response.data) {
-        return res.json({
-          streams: [
-            {
-              title: response.data.name,
-              name: 'Seedr',
-              url: `https://www.seedr.cc/rest/file/${id}/hls`,
-              behaviorHints: { bingeGroup: `seedr-${id}` }
-            }
-          ]
-        });
-      }
-    } catch (e) {
-      continue;
-    }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const [email, fileId] = req.params.id.split(':');
+  const users = readUsers();
+  const password = users[email];
+
+  if (!password) return res.json({ streams: [] });
+
+  try {
+    const auth = { auth: { username: email, password } };
+    const { data } = await axios.get(`https://www.seedr.cc/rest/file/${fileId}`, auth);
+    const stream = {
+      title: data.name,
+      name: 'Seedr',
+      url: `https://www.seedr.cc/rest/file/${fileId}/hls`,
+    };
+    res.json({ streams: [stream] });
+  } catch (err) {
+    console.error('Stream error:', err.message);
+    res.json({ streams: [] });
   }
-  res.json({ streams: [] });
 });
+
+// --- Login Form ---
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.post('/login', (req, res) => {
+  const { email, password } = req.body;
+  axios.get('https://www.seedr.cc/rest/user', { auth: { username: email, password } })
+    .then(() => {
+      const users = readUsers();
+      users[email] = password; // Overwrite if already exists
+      saveUsers(users);
+      res.send('✅ Login successful! You can now install: <a href="stremio://seedr-16fi.onrender.com/manifest.json">Install Addon</a>');
+    })
+    .catch(() => {
+      res.send('❌ Login Failed. Please try again.');
+    });
+});
+
+function isVideoFile(name) {
+  return ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'].some(ext => name.endsWith(ext));
+}
 
 app.listen(PORT, () => {
   console.log(`✅ Seedr Addon running on http://localhost:${PORT}`);
