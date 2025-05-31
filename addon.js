@@ -9,6 +9,10 @@ const PORT = process.env.PORT || 10000;
 
 const USERS_FILE = path.join(__dirname, 'users.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const API_URL = 'https://www.seedr.cc/api';
+const DEVICE_CODE_URL = 'https://www.seedr.cc/api/device/code';
+const AUTHENTICATION_URL = 'https://www.seedr.cc/api/device/authorize';
+const CLIENT_ID = 'seedr_xbmc';
 
 // Middleware
 app.use(cors()); // Enable CORS for Stremio
@@ -28,22 +32,18 @@ function saveUsers(data) {
   fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
 }
 
-// Seedr API request helper
-async function seedrRequest(email, password, endpoint, method = 'GET', data = {}) {
+// API request helper
+async function fetchJsonDictionary(url, postParams = null) {
   try {
-    const config = {
-      method: method,
-      url: `https://www.seedr.cc/rest/${endpoint}`,
-      auth: { username: email, password: password },
-      headers: { 'Content-Type': 'application/json' }
-    };
-    if (method === 'POST') {
-      config.data = data;
+    if (postParams) {
+      const r = await axios.post(url, postParams);
+      return r.data;
+    } else {
+      const r = await axios.get(url);
+      return r.data;
     }
-    const resp = await axios(config);
-    return resp.data;
   } catch (e) {
-    console.error(`Seedr API error at ${endpoint}:`, e.message);
+    console.error(`API error at ${url}:`, e.message);
     throw e;
   }
 }
@@ -53,31 +53,62 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
-// Route: Login
-app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
+// Route: Get Device Code
+app.post('/get-device-code', async (req, res) => {
   try {
-    const result = await seedrRequest(email, password, 'user');
-    if (result && result.user_id) { // Check for valid user data
+    const deviceCodeDict = await fetchJsonDictionary(`${DEVICE_CODE_URL}?client_id=${CLIENT_ID}`);
+    if (deviceCodeDict && deviceCodeDict.device_code && deviceCodeDict.user_code) {
       const users = loadUsers();
-      users[email] = password; // Store password for personal use (secure over HTTPS)
+      users.tempDeviceCode = deviceCodeDict.device_code;
+      users.deviceCodeDict = deviceCodeDict;
       saveUsers(users);
-      console.log(`Login successful for ${email}, user_id: ${result.user_id}`);
-      res.json({ success: true, message: 'Login successful' });
+      console.log('Device code generated:', deviceCodeDict.user_code);
+      res.json({
+        success: true,
+        user_code: deviceCodeDict.user_code,
+        device_code: deviceCodeDict.device_code
+      });
     } else {
-      console.log(`Login failed for ${email}: Invalid response`);
-      res.json({ success: false, error: 'Invalid email or password' });
+      console.log('Failed to get device code');
+      res.json({ success: false, error: 'Failed to get device code' });
     }
   } catch (e) {
-    console.error(`Login error for ${email}:`, e.message);
-    res.json({ success: false, error: 'Login failed. Check credentials or connection.' });
+    console.error('Error getting device code:', e.message);
+    res.json({ success: false, error: 'Server error. Try again.' });
+  }
+});
+
+// Route: Check Authorization and Get Token
+app.post('/check-auth', async (req, res) => {
+  const users = loadUsers();
+  const deviceCode = users.tempDeviceCode;
+  if (!deviceCode) {
+    console.error('No device code found');
+    return res.json({ success: false, error: 'No device code. Request a new one.' });
+  }
+  try {
+    const tokenDict = await fetchJsonDictionary(`${AUTHENTICATION_URL}?device_code=${deviceCode}&client_id=${CLIENT_ID}`);
+    if (tokenDict && !tokenDict.error && tokenDict.access_token) {
+      users.access_token = tokenDict.access_token;
+      delete users.tempDeviceCode; // Clean up
+      delete users.deviceCodeDict;
+      saveUsers(users);
+      console.log('Authorization successful, token:', tokenDict.access_token);
+      res.json({ success: true, message: 'Authorization successful' });
+    } else {
+      console.log('Authorization not complete:', tokenDict.error || 'No token');
+      res.json({ success: false, error: 'Authorization not complete. Enter code at seedr.cc/devices.' });
+    }
+  } catch (e) {
+    console.error('Error checking auth:', e.message);
+    res.json({ success: false, error: 'Server error. Try again.' });
   }
 });
 
 // Route: Manifest
 app.get('/manifest.json', (req, res) => {
   res.json({
-    id: 'sidh3369.seedr.stremio.addon', // Unique ID
+    idtypename: 'sidh3369.seedr.stremio.addon', // Unique ID
     version: '1.0.0',
     name: 'Seedr Addon',
     description: 'Stream from your Seedr.cc cloud.',
@@ -91,72 +122,71 @@ app.get('/manifest.json', (req, res) => {
 // Route: Catalog
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
   const users = loadUsers();
-  let items = [];
-
-  for (const [email, password] of Object.entries(users)) {
-    try {
-      // Get root folder
-      const root = await seedrRequest(email, password, 'folder');
-      const folders = root.folders || [];
-      for (const folder of folders) {
-        // Get files in each folder
-        const folderData = await seedrRequest(email, password, `folder/${folder.id}`);
-        const files = folderData.files || [];
-        for (const file of files) {
-          if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
-          items.push({
-            id: `${email}|${file.id}`,
-            name: file.name,
-            type: 'movie',
-            poster: `https://www.seedr.cc/rest/file/${file.id}/thumbnail` || 'https://via.placeholder.com/150'
-          });
-        }
-      }
-      // Check root files too
-      const rootFiles = root.files || [];
-      for (const file of rootFiles) {
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    console.error('No access token found');
+    return res.json({ metas: [] });
+  }
+  try {
+    const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
+    const items = [];
+    const folders = data.folders || [];
+    const files = data.files || [];
+    for (const folder of folders) {
+      const folderData = await fetchJsonDictionary(`${API_URL}/folder/${folder.id}?access_token=${accessToken}`);
+      const folderFiles = folderData.files || [];
+      for (const file of folderFiles) {
         if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
         items.push({
-          id: `${email}|${file.id}`,
+          id: `seedr|${file.folder_file_id}`,
           name: file.name,
           type: 'movie',
-          poster: `https://www.seedr.cc/rest/file/${file.id}/thumbnail` || 'https://via.placeholder.com/150'
+          poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
         });
       }
-    } catch (e) {
-      console.error(`Catalog failed for user ${email}:`, e.message);
     }
+    for (const file of files) {
+      if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
+      items.push({
+        id: `seedr|${file.folder_file_id}`,
+        name: file.name,
+        type: 'movie',
+        poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
+      });
+    }
+    res.json({ metas: items });
+  } catch (e) {
+    console.error('Catalog error:', e.message);
+    res.json({ metas: [] });
   }
-  res.json({ metas: items });
 });
 
 // Route: Stream
 app.get('/stream/:type/:id.json', async (req, res) => {
-  const [email, fileId] = req.params.id.split('|');
+  const [prefix, fileId] = req.params.id.split('|');
   const users = loadUsers();
-  const password = users[email];
-
-  if (!password) {
-    console.error(`No credentials for user ${email}`);
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    console.error('No access token found');
     return res.json({ streams: [] });
   }
-
   try {
-    const hlsData = await seedrRequest(email, password, `file/${fileId}/hls`);
-    if (hlsData && hlsData.url) {
+    const url = `${API_URL}/media/hls/${fileId}?access_token=${accessToken}`;
+    const response = await fetchJsonDictionary(url);
+    if (response && response.url) {
       res.json({
         streams: [{
           title: 'Seedr Stream',
-          url: hlsData.url, // HLS URL for streaming
+          url: response.url, // HLS (M3U) URL for streaming
           behaviorHints: { bingeGroup: `seedr-${fileId}` }
         }]
       });
     } else {
-      console.error(`No HLS URL for file ${fileId}`);
+      console.error(`No stream URL for file ${fileId}`);
       res.json({ streams: [] });
     }
   } catch (e) {
-    console.error(`Stream error for ${fileId} by ${email}:`, e.message);
+    console.error(`Stream error for ${fileId}:`, e.message);
     res.json({ streams: [] });
   }
 });
