@@ -138,4 +138,92 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
       console.log(`Folder ${folder.id} data:`, JSON.stringify(folderData, null, 2));
       const folderFiles = folderData.files || [];
       for (const file of folderFiles) {
-        if (!file.name.toLowerCase().match(/\
+        if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
+        if (!file.play_video && !file.play_audio) continue;
+        if (file.video_progress !== '100' && file.video_progress !== '101') continue; // Ensure fully downloaded
+        items.push({
+          id: `seedr|${file.folder_file_id}`,
+          name: file.name,
+          type: 'movie',
+          poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
+        });
+      }
+    }
+    for (const file of files) {
+      if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
+      if (!file.play_video && !file.play_audio) continue;
+      if (file.video_progress !== '100' && file.video_progress !== '101') continue; // Ensure fully downloaded
+      items.push({
+        id: `seedr|${file.folder_file_id}`,
+        name: file.name,
+        type: 'movie',
+        poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
+      });
+    }
+    console.log('Catalog items:', JSON.stringify(items, null, 2));
+    res.json({ metas: items });
+  } catch (e) {
+    console.error('Catalog error:', e.message, e.response?.data || '');
+    res.json({ metas: [] });
+  }
+});
+
+// Route: Stream
+app.get('/stream/:type/:id.json', async (req, res) => {
+  const [prefix, fileId] = req.params.id.split('|');
+  const users = loadUsers();
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    console.error('No access token found for stream request');
+    return res.json({ streams: [] });
+  }
+  try {
+    console.log(`Fetching stream for fileId: ${fileId}`);
+    // Try primary HLS endpoint
+    let url = `${API_URL}/media/hls/${fileId}?access_token=${accessToken}`;
+    let response = await fetchJsonDictionary(url);
+    console.log(`Stream API response for ${fileId} (/media/hls):`, JSON.stringify(response, null, 2));
+    if (response && response.url) {
+      console.log(`Stream URL generated: ${response.url}`);
+      res.json({
+        streams: [{
+          title: 'Seedr Stream',
+          url: response.url,
+          behaviorHints: { bingeGroup: `seedr-${fileId}` }
+        }]
+      });
+      return;
+    }
+    // Fallback 1: Try file info to verify streamability
+    url = `${API_URL}/file/${fileId}?access_token=${accessToken}`;
+    response = await fetchJsonDictionary(url);
+    console.log(`File info response for ${fileId}:`, JSON.stringify(response, null, 2));
+    if (response && (response.play_video || response.play_audio) && response.progress >= 100) {
+      // Try alternative HLS endpoint
+      url = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
+      response = await fetchJsonDictionary(url);
+      console.log(`Stream API response for ${fileId} (/file/hls):`, JSON.stringify(response, null, 2));
+      if (response && response.url) {
+        console.log(`Stream URL generated (file/hls): ${response.url}`);
+        res.json({
+          streams: [{
+            title: 'Seedr Stream',
+            url: response.url,
+            behaviorHints: { bingeGroup: `seedr-${fileId}` }
+          }]
+        });
+        return;
+      }
+    }
+    console.error(`No streamable URL for file ${fileId}`);
+    res.json({ streams: [] });
+  } catch (e) {
+    console.error(`Stream error for ${fileId}:`, e.message, e.response?.data || '');
+    res.json({ streams: [] });
+  }
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`✅ Seedr Addon running on http://localhost:${PORT}`);
+});
