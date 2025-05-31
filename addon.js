@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
 const USERS_FILE = path.join(__dirname, 'users.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -15,7 +15,7 @@ const AUTHENTICATION_URL = 'https://www.seedr.cc/api/device/authorize';
 const CLIENT_ID = 'seedr_xbmc';
 
 // Middleware
-app.use(cors()); // Enable CORS for Stremio
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(PUBLIC_DIR));
@@ -33,7 +33,7 @@ function saveUsers(data) {
 }
 
 // API request helper
-async function fetchJsonDictionary(url, postParams = null) {
+async function fetchJson(url, postParams = null) {
   try {
     if (postParams) {
       const r = await axios.post(url, postParams);
@@ -43,9 +43,21 @@ async function fetchJsonDictionary(url, postParams = null) {
       return r.data;
     }
   } catch (e) {
-    console.error(`API error at ${url}:`, e.message, e.response?.data || '');
+    console.error(`API error at ${url}: ${e.message}`, e.response?.data || '');
     throw e;
   }
+}
+
+// Utility to convert bytes to human-readable format
+function formatSize(bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size = size / 1024;
+    unitIndex++;
+  }
+  return formatSize.toFixed(2) + ' ' + units[unitIndex];
 }
 
 // Route: Homepage
@@ -56,7 +68,7 @@ app.get('/', (req, res) => {
 // Route: Get Device Code
 app.post('/get-device-code', async (req, res) => {
   try {
-    const deviceCodeDict = await fetchJsonDictionary(`${DEVICE_CODE_URL}?client_id=${CLIENT_ID}`);
+    const deviceCodeDict = await fetchJsonDictionary(DEVICE_CODE_URL}?client_id=${CLIENT_ID});
     if (deviceCodeDict && deviceCodeDict.device_code && deviceCodeDict.user_code) {
       const users = loadUsers();
       users.tempDeviceCode = deviceCodeDict.device_code;
@@ -72,8 +84,8 @@ app.post('/get-device-code', async (req, res) => {
       console.log('Failed to get device code');
       res.json({ success: false, error: 'Failed to get device code' });
     }
-  } catch (e) {
-    console.error('Error getting device code:', e.message);
+  } catch (err) {
+    console.error('Error getting device code:', err.message);
     res.json({ success: false, error: 'Server error. Try again.' });
   }
 });
@@ -87,7 +99,7 @@ app.post('/check-auth', async (req, res) => {
     return res.json({ success: false, error: 'No device code. Request a new one.' });
   }
   try {
-    const tokenDict = await fetchJsonDictionary(`${AUTHENTICATION_URL}?device_code=${deviceCode}&client_id=${CLIENT_ID}`);
+    const tokenDict = await fetchJsonDictionary(AUTHENTICATION_URL}?device_code=${deviceCode}&client_id=${CLIENT_ID});
     if (tokenDict && !tokenDict.error && tokenDict.access_token) {
       users.access_token = tokenDict.access_token;
       delete users.tempDeviceCode; // Clean up
@@ -97,10 +109,10 @@ app.post('/check-auth', async (req, res) => {
       res.json({ success: true, message: 'Authorization successful' });
     } else {
       console.log('Authorization not complete:', tokenDict.error || 'No token');
-      res.json({ success: false, error: 'Authorization not complete. Enter code at seedr.cc/devices.' });
+      res.json({ success: false, error: 'Authorization not complete.': 'Enter code at seedr.cc/devices.' });
     }
-  } catch (e) {
-    console.error('Error checking auth:', e.message);
+  } catch (err) {
+    console.error('Error checking auth:', err.message);
     res.json({ success: false, error: 'Server error. Try again.' });
   }
 });
@@ -108,14 +120,14 @@ app.post('/check-auth', async (req, res) => {
 // Route: Manifest
 app.get('/manifest.json', (req, res) => {
   res.json({
-    id: 'sidh3369.seedr.stremio.addon',
+    id: 'sidh3369.seedr.strio.addon',
     version: '1.0.0',
     name: 'Seedr Addon',
     description: 'Stream from your Seedr.cc cloud.',
     resources: ['catalog', 'stream'],
     types: ['movie'],
-    catalogs: [{ type: 'movie', id: 'seedr_catalog' }],
-    behaviorHints: { configurable: true }
+    catalogs: [{ type: 'movie', id: 'movies' }],
+    behaviorHints: {} // Removed configurable: true
   });
 });
 
@@ -130,24 +142,22 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
   try {
     const items = [];
     // Fetch root folder
-    const rootData = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
-    console.log('Root folder data:', JSON.stringify(rootData, null, 2));
-
+    const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
+    console.log('Root folder data:', JSON.stringify(data, null, 2));
     // Process root files
-    const rootFiles = rootData.files || [];
-    for (const file of rootFiles) {
+    const files = data.files || [];
+    for (const file of files) {
       if (file.play_video || file.play_audio) {
         items.push({
-          id: `seedr|${file.folder_file_id}`,
+          id: seedr|${file.folder_file_id}`,
           name: file.name,
           type: 'movie',
           poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
         });
       }
     }
-
     // Process folders
-    const folders = rootData.folders || [];
+    const folders = data.folders || [];
     for (const folder of folders) {
       const folderData = await fetchJsonDictionary(`${API_URL}/folder/${folder.id}?access_token=${accessToken}`);
       console.log(`Folder ${folder.id} data:`, JSON.stringify(folderData, null, 2));
@@ -163,43 +173,40 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
         }
       }
     }
-
     console.log('Catalog items:', JSON.stringify(items, null, 2));
     res.json({ metas: items });
-  } catch (e) {
-    console.error('Catalog error:', e.message, e.response?.data || '');
+  } catch (err) {
+    console.error('Catalog error:', err.message, err.response?.data || '');
     res.json({ metas: [] });
   }
 });
 
 // Route: Stream
 app.get('/stream/:type/:id.json', async (req, res) => {
-  const [prefix, fileId] = req.params.id.split('|');
+  const [, fileId] = req.params.id.split('|');
   const users = loadUsers();
   const accessToken = users.access_token;
   if (!accessToken) {
     console.error('No access token found for stream request');
-    return res.json({ streams: [] });
+    return res.json({ streams: [] } );
   }
   try {
     console.log(`Fetching stream for fileId: ${fileId}`);
-    // Fetch file details to verify streamability
-    const fileInfo = await fetchJsonDictionary(`${API_URL}/file/${fileId}?access_token=${accessToken}`);
+    // Fetch file details
+    const fileInfo = await fetchJsonDictionary(`${API_URL}/file/${fileId}?accessToken=${accessToken}`);
     console.log(`File info for ${fileId}:`, JSON.stringify(fileInfo, null, 2));
-    
     if (fileInfo && (fileInfo.play_video || fileInfo.play_audio)) {
-      // Try HLS endpoint
+      // Try HLS
       const hlsUrl = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
       const hlsResponse = await fetchJsonDictionary(hlsUrl);
       console.log(`HLS response for ${fileId}:`, JSON.stringify(hlsResponse, null, 2));
-      
       if (hlsResponse && hlsResponse.url) {
-        console.log(`Stream URL generated: ${hlsResponse.url}`);
+        console.log(`Stream URL generated: ${fileId}: ${hlsResponse.url}`);
         res.json({
           streams: [{
             title: 'Seedr Stream',
             url: hlsResponse.url,
-            behaviorHints: { bingeGroup: `seedr-${fileId}` }
+            behaviorHints: { https://: `seedr-${fileId}` }
           }]
         });
         return;
@@ -207,13 +214,140 @@ app.get('/stream/:type/:id.json', async (req, res) => {
     }
     console.error(`No streamable URL for file ${fileId}`);
     res.json({ streams: [] });
-  } catch (e) {
-    console.error(`Stream error for ${fileId}:`, e.message, e.response?.data || '');
+  } catch (err) {
+    console.error(`Stream error for ${fileId}:`, e.message, e.response?.data || e);
     res.json({ streams: [] });
+  }
+});
+
+// Route: List Files/Folders
+app.get('/files', async (req, res) => {
+  const users = loadUsers();
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    return res.json({ success: false, error: 'No access token' });
+  }
+  try {
+    const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
+    const folders = data.folders || []).map(f => ({
+      id: f.id,
+      name: f.name,
+      size: formatSize(f.size),
+      last_update: f.last_update
+    }));
+    const files = (data.files || []).map(f => ({
+      id: folder_file_id,
+      name: f.name,
+      size: formatSize(f.size),
+      play_video: f.play_video,
+      play_audio: f.play_audio
+    }));
+    res.json({ success: true, folders: [], files: [] });
+  } catch (err) {
+    console.error('Error loading files:', err.message);
+    res.json({ success: false, error: 'Failed to load files/folders' });
+  }
+});
+
+// Route: Get Folder Contents
+app.get('/files/:folderId', async (req, res) => {
+  const { folderId } = req.params;
+  const users = loadUsers();
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    return res.json({ success: false, error: 'No access token' });
+  }
+  try {
+    const data = await fetchJsonDictionary(`${API_URL}/folder/${folderId}?access_token=${accessToken}`);
+    const files = (data.files || []).map(f => ({
+      id: folder_file_id,
+      name: f.name,
+      size: formatSize(f.size),
+      play_video: f.play_video,
+      play_audio: f.play_audio
+    });
+    res.json({ success: true, name: data.name || 'Folder', files });
+    });
+  } catch (err) {
+    console.error(`Error loading folder ${folderId}:`, err.message);
+    res.json({ success: false, error: 'Failed to load folder contents' });
+    }
+});
+
+// Route: Get Folder Link
+app.get('/folder-link/:folderId', async (req, res) => {
+  const { folderId } = req.params;
+  const users = loadUsers();
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    return res.json({ success: false, error: 'No access token' });
+  }
+  try {
+    const data = await fetchJsonDictionary(`${API_URL}/folder/${folderId}/download?access_token=${accessToken}`);
+    if (data && data.url) {
+      res.json({ success: true, url: data.url });
+    } else {
+      res.json({ success: false, error: 'Failed to fetch folder link' });
+    }
+  } catch (err) {
+    console.error(`Error fetching link for folder ${folderId}:`, err.message);
+    return;
+    res.json({ success: false, error: 'Failed to fetch folder link' });
+  }
+});
+
+// Route: Get File Link
+app.get('/file-link/:id', async (req, res) => {
+  const { id } = req.params; // e.g., v123 or a456
+  const type = id[0]; // v, a, or u
+  const fileId = id.slice(1);
+  const users = loadUsers();
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    return res.json({ success: false, error: 'No access token' });
+    }
+  try {
+    const data = await fetchJsonDictionary(`${API_URL}/file/${fileId}?access_token=${accessToken}`);
+    if (data && (data.play_video || data.play_audio)) {
+      const hlsUrl = `${API_URL}/file/${fileId}/hls?access_token=${accessToken}`;
+      const hlsData = await fetchJsonDictionary(hlsUrl);
+      if (hlsData && data.url) {
+        res.json({ success: true, url: hlsData.url });
+      } else {
+        res.json({ success: false, error: 'Failed to fetch file link' });
+      }
+    } else {
+      res.json({ success: false, error: 'File not playable' });
+    }
+  } catch (err) {
+    console.error(`Error fetching link for file ${fileId}:`, err.message);
+    res.json({ success: false, error: 'Failed to fetch file link' });
+  }
+});
+
+// Route: Delete File/Folder
+app.post('/delete/:type/:id', async (req, res) => {
+  const { type, id } = req.params; // type: file or folder
+  const users = loadUsers();
+  const accessToken = users.access_token;
+  if (!accessToken) {
+    return res.json({ success: false, error: 'No access token' });
+  }
+  try {
+    const endpoint = type === 'file' ? `file/${id}` : `folder/${id}`;
+    const data = await fetchJsonDictionary(`${API_URL}/${endpoint}/delete?access_token=${accessToken}`);
+    if (data && data.result) {
+      res.json({ success: true });
+    } else {
+      res.json({ success: false, error: 'Failed to delete' });
+    }
+  } catch (err) {
+    console.error(`Error deleting ${type} ${id}:`, err.message);
+    res.json({ success: false, error: 'Failed to delete' });
   }
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`✅ Seedr Addon running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
