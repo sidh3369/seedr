@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const Seedr = require('seedr');
+const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
@@ -28,6 +28,26 @@ function saveUsers(data) {
   fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
 }
 
+// Seedr API request helper
+async function seedrRequest(email, password, endpoint, method = 'GET', data = {}) {
+  try {
+    const config = {
+      method: method,
+      url: `https://www.seedr.cc/rest/${endpoint}`,
+      auth: { username: email, password: password },
+      headers: { 'Content-Type': 'application/json' }
+    };
+    if (method === 'POST') {
+      config.data = data;
+    }
+    const resp = await axios(config);
+    return resp.data;
+  } catch (e) {
+    console.error(`Seedr API error at ${endpoint}:`, e.message);
+    throw e;
+  }
+}
+
 // Route: Homepage
 app.get('/', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
@@ -37,16 +57,15 @@ app.get('/', (req, res) => {
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const seedr = new Seedr();
-    const response = await seedr.login({ email, password });
-    if (response.token) {
+    const result = await seedrRequest(email, password, 'user');
+    if (result && result.user_id) { // Check for valid user data
       const users = loadUsers();
-      users[email] = response.token; // Store token, not password
+      users[email] = password; // Store password for personal use (secure over HTTPS)
       saveUsers(users);
-      console.log(`Login successful for ${email}, token: ${response.token}`);
-      res.json({ success: true, message: 'Token acquired' });
+      console.log(`Login successful for ${email}, user_id: ${result.user_id}`);
+      res.json({ success: true, message: 'Login successful' });
     } else {
-      console.log(`Login failed for ${email}: No token in response`);
+      console.log(`Login failed for ${email}: Invalid response`);
       res.json({ success: false, error: 'Invalid email or password' });
     }
   } catch (e) {
@@ -74,18 +93,34 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
   const users = loadUsers();
   let items = [];
 
-  for (const [email, token] of Object.entries(users)) {
+  for (const [email, password] of Object.entries(users)) {
     try {
-      const seedr = new Seedr({ token });
-      const contents = await seedr.listContents();
-      const files = contents.files || [];
-      for (const file of files) {
+      // Get root folder
+      const root = await seedrRequest(email, password, 'folder');
+      const folders = root.folders || [];
+      for (const folder of folders) {
+        // Get files in each folder
+        const folderData = await seedrRequest(email, password, `folder/${folder.id}`);
+        const files = folderData.files || [];
+        for (const file of files) {
+          if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
+          items.push({
+            id: `${email}|${file.id}`,
+            name: file.name,
+            type: 'movie',
+            poster: `https://www.seedr.cc/rest/file/${file.id}/thumbnail` || 'https://via.placeholder.com/150'
+          });
+        }
+      }
+      // Check root files too
+      const rootFiles = root.files || [];
+      for (const file of rootFiles) {
         if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
         items.push({
           id: `${email}|${file.id}`,
           name: file.name,
           type: 'movie',
-          poster: file.thumbnail || 'https://via.placeholder.com/150', // Fallback poster
+          poster: `https://www.seedr.cc/rest/file/${file.id}/thumbnail` || 'https://via.placeholder.com/150'
         });
       }
     } catch (e) {
@@ -99,26 +134,25 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 app.get('/stream/:type/:id.json', async (req, res) => {
   const [email, fileId] = req.params.id.split('|');
   const users = loadUsers();
-  const token = users[email];
+  const password = users[email];
 
-  if (!token) {
-    console.error(`No token for user ${email}`);
+  if (!password) {
+    console.error(`No credentials for user ${email}`);
     return res.json({ streams: [] });
   }
 
   try {
-    const seedr = new Seedr({ token });
-    const file = await seedr.getFile(fileId);
-    if (file.url) {
+    const hlsData = await seedrRequest(email, password, `file/${fileId}/hls`);
+    if (hlsData && hlsData.url) {
       res.json({
         streams: [{
           title: 'Seedr Stream',
-          url: file.url, // Streamable URL from Seedr
+          url: hlsData.url, // HLS URL for streaming
           behaviorHints: { bingeGroup: `seedr-${fileId}` }
         }]
       });
     } else {
-      console.error(`No stream URL for file ${fileId}`);
+      console.error(`No HLS URL for file ${fileId}`);
       res.json({ streams: [] });
     }
   } catch (e) {
