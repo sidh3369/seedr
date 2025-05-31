@@ -109,11 +109,11 @@
         const result = await res.json();
 
         if (res.ok && result.success) {
-          message.textContent = '✅ Login successful! Token saved.';
+          message.textContent = '✅ Login successful! Credentials saved.';
           installLink.href = `stremio://${window.location.host}/manifest.json`;
           installLink.style.display = 'block';
         } else {
-          message.textContent = `❌ ${result.error || 'Login failed. Check credentials.'}`;
+          message.textContent = `❌ ${result.error || 'Login failed. Check credentials or connection.'}`;
           installLink.style.display = 'none';
         }
       } catch (err) {
