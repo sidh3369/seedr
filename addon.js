@@ -43,7 +43,7 @@ async function fetchJsonDictionary(url, postParams = null) {
       return r.data;
     }
   } catch (e) {
-    console.error(`API error at ${url}:`, e.message);
+    console.error(`API error at ${url}:`, e.message, e.response?.data || '');
     throw e;
   }
 }
@@ -129,75 +129,13 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
   }
   try {
     const data = await fetchJsonDictionary(`${API_URL}/folder?access_token=${accessToken}`);
+    console.log('Root folder data:', JSON.stringify(data, null, 2));
     const items = [];
     const folders = data.folders || [];
     const files = data.files || [];
     for (const folder of folders) {
       const folderData = await fetchJsonDictionary(`${API_URL}/folder/${folder.id}?access_token=${accessToken}`);
+      console.log(`Folder ${folder.id} data:`, JSON.stringify(folderData, null, 2));
       const folderFiles = folderData.files || [];
       for (const file of folderFiles) {
-        if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
-        if (!file.play_video && !file.play_audio) continue; // Ensure streamable
-        items.push({
-          id: `seedr|${file.folder_file_id}`,
-          name: file.name,
-          type: 'movie',
-          poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
-        });
-      }
-    }
-    for (const file of files) {
-      if (!file.name.toLowerCase().match(/\.(mp4|mkv|avi)$/)) continue;
-      if (!file.play_video && !file.play_audio) continue; // Ensure streamable
-      items.push({
-        id: `seedr|${file.folder_file_id}`,
-        name: file.name,
-        type: 'movie',
-        poster: `${API_URL}/thumbnail/${file.folder_file_id}?access_token=${accessToken}` || 'https://via.placeholder.com/150'
-      });
-    }
-    console.log('Catalog items:', items);
-    res.json({ metas: items });
-  } catch (e) {
-    console.error('Catalog error:', e.message);
-    res.json({ metas: [] });
-  }
-});
-
-// Route: Stream
-app.get('/stream/:type/:id.json', async (req, res) => {
-  const [prefix, fileId] = req.params.id.split('|');
-  const users = loadUsers();
-  const accessToken = users.access_token;
-  if (!accessToken) {
-    console.error('No access token found for stream request');
-    return res.json({ streams: [] });
-  }
-  try {
-    console.log(`Fetching stream for fileId: ${fileId}`);
-    const url = `${API_URL}/media/hls/${fileId}?access_token=${accessToken}`;
-    const response = await fetchJsonDictionary(url);
-    console.log(`Stream API response for ${fileId}:`, JSON.stringify(response, null, 2));
-    if (response && response.url) {
-      console.log(`Stream URL generated: ${response.url}`);
-      res.json({
-        streams: [{
-          title: 'Seedr Stream',
-          url: response.url, // HLS (M3U) URL
-          behaviorHints: { bingeGroup: `seedr-${fileId}` }
-        }]
-      });
-    } else {
-      console.error(`No stream URL in response for file ${fileId}`);
-      res.json({ streams: [] });
-    }
-  } catch (e) {
-    console.error(`Stream error for ${fileId}:`, e.message, e.response?.data || '');
-    res.json({ streams: [] });
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`✅ Seedr Addon running on http://localhost:${PORT}`);
-});
+        if (!file.name.toLowerCase().match(/\
