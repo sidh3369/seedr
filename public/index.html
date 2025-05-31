@@ -15,7 +15,7 @@
     }
 
     .container {
-      max-width: 400px;
+      max-width: 600px;
       margin: 4rem auto;
       background: #fff;
       padding: 2rem;
@@ -39,10 +39,27 @@
       border-radius: 8px;
       cursor: pointer;
       transition: background 0.3s ease;
+      margin-bottom: 1rem;
     }
 
     button:hover {
       background: #005dc1;
+    }
+
+    .copy-btn {
+      background: #28a745;
+    }
+
+    .copy-btn:hover {
+      background: #218838;
+    }
+
+    .show-files-btn {
+      background: #6c757d;
+    }
+
+    .show-files-btn:hover {
+      background: #5a6268;
     }
 
     .message {
@@ -63,20 +80,47 @@
     .install-link:hover {
       text-decoration: underline;
     }
+
+    #filesList {
+      margin-top: 2rem;
+      text-align: left;
+    }
+
+    .file-item, .folder-item {
+      padding: 1rem;
+      border-bottom: 1px solid #eee;
+    }
+
+    .file-item a, .folder-item a {
+      margin-right: 1rem;
+      color: #0070f3;
+      text-decoration: none;
+    }
+
+    .file-item a:hover, .folder-item a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Authorize Seedr</h1>
     <button id="getCodeBtn">🔐 Get Authorization Code</button>
+    <button id="copyCodeBtn" class="copy-btn" style="display: none;">📋 Copy Code</button>
+    <button id="showFilesBtn" class="show-files-btn" style="display: none;">📂 Show Files</button>
     <p class="message" id="message"></p>
     <a id="installLink" class="install-link" href="#" style="display: none;">🚀 Install Stremio Addon</a>
+    <div id="filesList"></div>
   </div>
 
   <script>
     const getCodeBtn = document.getElementById('getCodeBtn');
+    const copyCodeBtn = document.getElementById('copyCodeBtn');
+    const showFilesBtn = document.getElementById('showFilesBtn');
     const message = document.getElementById('message');
     const installLink = document.getElementById('installLink');
+    const filesList = document.getElementById('filesList');
+    let userCode = '';
 
     getCodeBtn.addEventListener('click', async () => {
       message.textContent = '🔄 Requesting authorization code...';
@@ -87,8 +131,10 @@
         });
         const result = await res.json();
         if (res.ok && result.success) {
-          message.innerHTML = `✅ Enter this code at <a href="https://seedr.cc/devices" target="_blank">seedr.cc/devices</a>: <b>${result.user_code}</b><br>Then click "Check Authorization" below.`;
+          userCode = result.user_code;
+          message.innerHTML = `✅ Enter this code at <a href="https://seedr.cc/devices" target="_blank">seedr.cc/devices</a>: <b>${userCode}</b><br>Then click "Check Authorization" below.`;
           getCodeBtn.textContent = '🔍 Check Authorization';
+          copyCodeBtn.style.display = 'block';
           getCodeBtn.onclick = checkAuth;
         } else {
           message.textContent = `❌ ${result.error || 'Failed to get code. Try again.'}`;
@@ -97,6 +143,17 @@
         message.textContent = '❌ Server error. Check connection or try again.';
         console.error('Error:', err);
       }
+    });
+
+    copyCodeBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(userCode).then(() => {
+        message.textContent = '✅ Code copied to clipboard!';
+        setTimeout(() => {
+          message.innerHTML = `✅ Enter this code at <a href="https://seedr.cc/devices" target="_blank">seedr.cc/devices</a>: <b>${userCode}</b><br>Then click "Check Authorization" below.`;
+        }, 2000);
+      }).catch(() => {
+        message.textContent = '❌ Failed to copy code.';
+      });
     });
 
     async function checkAuth() {
@@ -111,11 +168,143 @@
           message.textContent = '✅ Authorization successful! Token saved.';
           installLink.href = `stremio://${window.location.host}/manifest.json`;
           installLink.style.display = 'block';
+          showFilesBtn.style.display = 'block';
+          copyCodeBtn.style.display = 'none';
         } else {
           message.textContent = `❌ ${result.error || 'Authorization not complete. Enter code at seedr.cc/devices.'}`;
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Error:', err);
+      }
+    }
+
+    showFilesBtn.addEventListener('click', async () => {
+      message.textContent = '🔄 Loading files...';
+      filesList.innerHTML = '';
+      try {
+        const res = await fetch('/files', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          message.textContent = '✅ Files loaded.';
+          result.folders.forEach(folder => {
+            const folderDiv = document.createElement('div');
+            folderDiv.className = 'folder-item';
+            folderDiv.innerHTML = `
+              <b>📂 ${folder.name}</b> (${folder.size})<br>
+              <a href="#" onclick="getFiles('${folder.id}')">Get Files</a>
+              <a href="#" onclick="getLink('${folder.id}')">Get Link</a>
+              <a href="#" onclick="deleteItem('${folder.id}', 'folder')">Delete</a>
+            `;
+            filesList.appendChild(folderDiv);
+          });
+          result.files.forEach(file => {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'file-item';
+            fileDiv.innerHTML = `
+              <b>${file.play_video ? '🎬' : file.play_audio ? '🎵' : '📄'} ${file.name}</b> (${file.size})<br>
+              <a href="#" onclick="getFileLink('${file.folder_file_id}', '${file.play_video ? 'v' : file.play_audio ? 'a' : 'u'}')">Get Link</a>
+              <a href="#" onclick="deleteItem('${file.folder_file_id}', 'file')">Delete</a>
+            `;
+            filesList.appendChild(fileDiv);
+          });
+        } else {
+          message.textContent = `❌ ${result.error || 'Failed to load files.'}`;
+        }
+      } catch (err) {
+        message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Error:', err);
+      }
+    });
+
+    async function getFiles(folderId) {
+      message.textContent = '🔄 Loading folder contents...';
+      filesList.innerHTML = '';
+      try {
+        const res = await fetch(`/files/${folderId}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          message.textContent = `✅ Folder: ${result.name}`;
+          result.files.forEach(file => {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'file-item';
+            fileDiv.innerHTML = `
+              <b>${file.play_video ? '🎬' : file.play_audio ? '🎵' : '📄'} ${file.name}</b> (${file.size})<br>
+              <a href="#" onclick="getFileLink('${file.folder_file_id}', '${file.play_video ? 'v' : file.play_audio ? 'a' : 'u'}')">Get Link</a>
+              <a href="#" onclick="deleteItem('${file.folder_file_id}', 'file')">Delete</a>
+            `;
+            filesList.appendChild(fileDiv);
+          });
+        } else {
+          message.textContent = `❌ ${result.error || 'Failed to load folder contents.'}`;
+        }
+      } catch (err) {
+        message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Error:', err);
+      }
+    }
+
+    async function getLink(folderId) {
+      message.textContent = '🔄 Fetching folder link...';
+      try {
+        const res = await fetch(`/folder-link/${folderId}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          message.innerHTML = `✅ Folder Link: <a href="${result.url}" target="_blank">${result.url}</a>`;
+        } else {
+          message.textContent = `❌ ${result.error || 'Failed to fetch link.'}`;
+        }
+      } catch (err) {
+        message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Error:', err);
+      }
+    }
+
+    async function getFileLink(fileId, type) {
+      message.textContent = '🔄 Fetching file link...';
+      try {
+        const res = await fetch(`/file-link/${type}${fileId}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          message.innerHTML = `✅ File Link: <a href="${result.url}" target="_blank">${result.url}</a>`;
+        } else {
+          message.textContent = `❌ ${result.error || 'Failed to fetch link.'}`;
+        }
+      } catch (err) {
+        message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Error:', err);
+      }
+    }
+
+    async function deleteItem(id, type) {
+      if (!confirm(`Are you sure you want to delete this ${type}?`)) return;
+      message.textContent = `🔄 Deleting ${type}...`;
+      try {
+        const res = await fetch(`/delete/${type}/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          message.textContent = `✅ ${type.charAt(0).toUpperCase()}${type.slice(1)} deleted successfully.`;
+          showFilesBtn.click(); // Refresh file list
+        } else {
+          message.textContent = `❌ ${result.error || `Failed to delete ${type}.`}`;
+        }
+      } catch (err) {
+        message.textContent = `❌ Server error. Check connection or try again.';
         console.error('Error:', err);
       }
     }
