@@ -1,20 +1,18 @@
 {
-  "name": "stremio-seedr-addon",
+  "name": "seedr-stremio-addon",
   "version": "1.0.0",
-  "description": "Stremio Addon for Seedr.cc",
+  "description": "Stremio addon for Seedr.cc streaming",
   "main": "addon.js",
   "scripts": {
     "start": "node addon.js"
   },
-  "keywords": [
-    "stremio",
-    "seedr"
-  ],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "express": "^4.17.1",
-    "seedr": "^1.0.0",
-    "dotenv": "^16.0.0"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "seedr": "^1.1.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   }
 }
