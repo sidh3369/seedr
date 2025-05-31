@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Seedr Stremio Addon</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: #f5f7fa;
+      color: #333;
+    }
+
+    .container {
+      max-width: 400px;
+      margin: 4rem auto;
+      background: #fff;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 1.8rem;
+      margin-bottom: 1rem;
+    }
+
+    input[type="email"],
+    input[type="password"] {
+      width: 100%;
+      padding: 0.75rem;
+      margin-bottom: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+
+    button {
+      width: 100%;
+      padding: 0.75rem;
+      font-size: 1rem;
+      background: #0070f3;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    button:hover {
+      background: #005dc1;
+    }
+
+    .message {
+      margin-top: 1rem;
+      text-align: center;
+      font-weight: 500;
+    }
+
+    .install-link {
+      display: block;
+      margin-top: 1.5rem;
+      text-align: center;
+      color: #0070f3;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .install-link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Login to Seedr</h1>
+    <form id="loginForm">
+      <input type="email" name="email" placeholder="Email" required />
+      <input type="password" name="password" placeholder="Password" required />
+      <button type="submit">🔐 Login</button>
+    </form>
+    <p class="message" id="message"></p>
+    <a id="installLink" class="install-link" href="#" style="display: none;">🚀 Install Stremio Addon</a>
+  </div>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const message = document.getElementById('message');
+    const installLink = document.getElementById('installLink');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      message.textContent = '🔄 Logging in...';
+
+      const email = form.email.value;
+      const password = form.password.value;
+
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const result = await res.json();
+
+        if (res.ok) {
+          message.textContent = '✅ Login successful!';
+          installLink.href = `stremio://${window.location.host}/manifest.json`;
+          installLink.style.display = 'block';
+        } else {
+          message.textContent = `❌ ${result.error || 'Login failed'}`;
+          installLink.style.display = 'none';
+        }
+      } catch (err) {
+        message.textContent = '❌ Server error. Try again.';
+        installLink.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>
