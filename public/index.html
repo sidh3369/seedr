@@ -13,7 +13,6 @@
       background: #f5f7fa;
       color: #333;
     }
-
     .container {
       max-width: 600px;
       margin: 4rem auto;
@@ -22,13 +21,11 @@
       border-radius: 12px;
       box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     }
-
     h1 {
       text-align: center;
       font-size: 1.8rem;
       margin-bottom: 1rem;
     }
-
     button {
       width: 100%;
       padding: 0.75rem;
@@ -41,33 +38,26 @@
       transition: background 0.3s ease;
       margin-bottom: 1rem;
     }
-
     button:hover {
       background: #005dc1;
     }
-
     .copy-btn {
       background: #28a745;
     }
-
     .copy-btn:hover {
       background: #218838;
     }
-
     .show-files-btn {
       background: #6c757d;
     }
-
     .show-files-btn:hover {
       background: #5a6268;
     }
-
     .message {
       margin-top: 1rem;
       text-align: center;
       font-weight: 500;
     }
-
     .install-link {
       display: block;
       margin-top: 1.5rem;
@@ -76,27 +66,22 @@
       text-decoration: none;
       font-weight: 600;
     }
-
     .install-link:hover {
       text-decoration: underline;
     }
-
     #filesList {
       margin-top: 2rem;
       text-align: left;
     }
-
     .file-item, .folder-item {
       padding: 1rem;
       border-bottom: 1px solid #eee;
     }
-
     .file-item a, .folder-item a {
       margin-right: 1rem;
       color: #0070f3;
       text-decoration: none;
     }
-
     .file-item a:hover, .folder-item a:hover {
       text-decoration: underline;
     }
@@ -114,6 +99,7 @@
   </div>
 
   <script>
+    console.log('Script loaded');
     const getCodeBtn = document.getElementById('getCodeBtn');
     const copyCodeBtn = document.getElementById('copyCodeBtn');
     const showFilesBtn = document.getElementById('showFilesBtn');
@@ -123,6 +109,7 @@
     let userCode = '';
 
     getCodeBtn.addEventListener('click', async () => {
+      console.log('Get Code button clicked');
       message.textContent = '🔄 Requesting authorization code...';
       try {
         const res = await fetch('/get-device-code', {
@@ -141,22 +128,25 @@
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        console.error('Fetch error:', err);
       }
     });
 
     copyCodeBtn.addEventListener('click', () => {
+      console.log('Copy Code button clicked');
       navigator.clipboard.writeText(userCode).then(() => {
         message.textContent = '✅ Code copied to clipboard!';
         setTimeout(() => {
           message.innerHTML = `✅ Enter this code at <a href="https://seedr.cc/devices" target="_blank">seedr.cc/devices</a>: <b>${userCode}</b><br>Then click "Check Authorization" below.`;
         }, 2000);
-      }).catch(() => {
+      }).catch((err) => {
         message.textContent = '❌ Failed to copy code.';
+        console.error('Copy error:', err);
       });
     });
 
     async function checkAuth() {
+      console.log('Check Auth button clicked');
       message.textContent = '🔄 Checking authorization...';
       try {
         const res = await fetch('/check-auth', {
@@ -175,11 +165,12 @@
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        console.error('Auth error:', err);
       }
     }
 
     showFilesBtn.addEventListener('click', async () => {
+      console.log('Show Files button clicked');
       message.textContent = '🔄 Loading files...';
       filesList.innerHTML = '';
       try {
@@ -216,11 +207,12 @@
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        console.error('Files error:', err);
       }
     });
 
     async function getFiles(folderId) {
+      console.log(`Get Files for folder ${folderId}`);
       message.textContent = '🔄 Loading folder contents...';
       filesList.innerHTML = '';
       try {
@@ -246,11 +238,12 @@
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        console.error('Folder error:', err);
       }
     }
 
     async function getLink(folderId) {
+      console.log(`Get Link for folder ${folderId}`);
       message.textContent = '🔄 Fetching folder link...';
       try {
         const res = await fetch(`/folder-link/${folderId}`, {
@@ -265,11 +258,12 @@
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        console.error('Link error:', err);
       }
     }
 
     async function getFileLink(fileId, type) {
+      console.log(`Get File Link for ${type}${fileId}`);
       message.textContent = '🔄 Fetching file link...';
       try {
         const res = await fetch(`/file-link/${type}${fileId}`, {
@@ -284,11 +278,12 @@
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        console.error('File link error:', err);
       }
     }
 
     async function deleteItem(id, type) {
+      console.log(`Delete ${type} ${id}`);
       if (!confirm(`Are you sure you want to delete this ${type}?`)) return;
       message.textContent = `🔄 Deleting ${type}...`;
       try {
@@ -299,13 +294,13 @@
         const result = await res.json();
         if (res.ok && result.success) {
           message.textContent = `✅ ${type.charAt(0).toUpperCase()}${type.slice(1)} deleted successfully.`;
-          showFilesBtn.click(); // Refresh file list
+          showFilesBtn.click();
         } else {
           message.textContent = `❌ ${result.error || `Failed to delete ${type}.`}`;
         }
       } catch (err) {
-        message.textContent = `❌ Server error. Check connection or try again.';
-        console.error('Error:', err);
+        message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Delete error:', err);
       }
     }
   </script>
