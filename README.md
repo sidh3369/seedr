@@ -1,2 +1,0 @@
-# seedr
-seedr account add
