@@ -10,11 +10,11 @@
     "stremio",
     "seedr"
   ],
-  "author": "Your Name",
+  "author": "",
   "license": "ISC",
   "dependencies": {
     "express": "^4.17.1",
-    "seedr": "^1.0.0"
-     "dotenv": "^16.0.0"  // ✅ this line should now be here
+    "seedr": "^1.0.0",
+    "dotenv": "^16.0.0"
   }
 }
