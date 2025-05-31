@@ -29,16 +29,6 @@
       margin-bottom: 1rem;
     }
 
-    input[type="email"],
-    input[type="password"] {
-      width: 100%;
-      padding: 0.75rem;
-      margin-bottom: 1rem;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 1rem;
-    }
-
     button {
       width: 100%;
       padding: 0.75rem;
@@ -77,51 +67,58 @@
 </head>
 <body>
   <div class="container">
-    <h1>Login to Seedr</h1>
-    <form id="loginForm">
-      <input type="email" name="email" placeholder="Email" required />
-      <input type="password" name="password" placeholder="Password" required />
-      <button type="submit">🔐 Login</button>
-    </form>
+    <h1>Authorize Seedr</h1>
+    <button id="getCodeBtn">🔐 Get Authorization Code</button>
     <p class="message" id="message"></p>
     <a id="installLink" class="install-link" href="#" style="display: none;">🚀 Install Stremio Addon</a>
   </div>
 
   <script>
-    const form = document.getElementById('loginForm');
+    const getCodeBtn = document.getElementById('getCodeBtn');
     const message = document.getElementById('message');
     const installLink = document.getElementById('installLink');
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      message.textContent = '🔄 Logging in...';
-
-      const email = form.email.value;
-      const password = form.password.value;
-
+    getCodeBtn.addEventListener('click', async () => {
+      message.textContent = '🔄 Requesting authorization code...';
       try {
-        const res = await fetch('/login', {
+        const res = await fetch('/get-device-code', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          headers: { 'Content-Type': 'application/json' }
         });
-
         const result = await res.json();
-
         if (res.ok && result.success) {
-          message.textContent = '✅ Login successful! Credentials saved.';
-          installLink.href = `stremio://${window.location.host}/manifest.json`;
-          installLink.style.display = 'block';
+          message.innerHTML = `✅ Enter this code at <a href="https://seedr.cc/devices" target="_blank">seedr.cc/devices</a>: <b>${result.user_code}</b><br>Then click "Check Authorization" below.`;
+          getCodeBtn.textContent = '🔍 Check Authorization';
+          getCodeBtn.onclick = checkAuth;
         } else {
-          message.textContent = `❌ ${result.error || 'Login failed. Check credentials or connection.'}`;
-          installLink.style.display = 'none';
+          message.textContent = `❌ ${result.error || 'Failed to get code. Try again.'}`;
         }
       } catch (err) {
         message.textContent = '❌ Server error. Check connection or try again.';
-        installLink.style.display = 'none';
         console.error('Error:', err);
       }
     });
+
+    async function checkAuth() {
+      message.textContent = '🔄 Checking authorization...';
+      try {
+        const res = await fetch('/check-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          message.textContent = '✅ Authorization successful! Token saved.';
+          installLink.href = `stremio://${window.location.host}/manifest.json`;
+          installLink.style.display = 'block';
+        } else {
+          message.textContent = `❌ ${result.error || 'Authorization not complete. Enter code at seedr.cc/devices.'}`;
+        }
+      } catch (err) {
+        message.textContent = '❌ Server error. Check connection or try again.';
+        console.error('Error:', err);
+      }
+    }
   </script>
 </body>
 </html>
